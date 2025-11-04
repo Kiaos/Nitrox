@@ -264,6 +264,31 @@ public static class NetHelper
     }
 
     /// <summary>
+    ///     Gets all LAN IP addresses (both IPv4 and IPv6).
+    /// </summary>
+    public static IEnumerable<IPAddress> GetAllLanIps()
+    {
+        foreach (NetworkInterface ni in GetInternetInterfaces())
+        {
+            foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
+            {
+                IPAddress normalized = NormalizeAddress(ip.Address);
+
+                if (normalized.AddressFamily == AddressFamily.InterNetwork)
+                {
+                    yield return normalized;
+                }
+                else if (normalized.AddressFamily == AddressFamily.InterNetworkV6
+                         && !normalized.IsIPv6LinkLocal
+                         && !normalized.IsIPv6Multicast)
+                {
+                    yield return normalized;
+                }
+            }
+        }
+    }
+
+    /// <summary>
     ///     Returns true if the IP address points to the executing machine.
     /// </summary>
     public static bool IsLocalhost(this IPAddress? address)

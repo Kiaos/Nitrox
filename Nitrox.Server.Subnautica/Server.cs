@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using Nitrox.Model.Core;
@@ -302,6 +303,18 @@ public class Server
         {
             IPAddress displayLan = NetHelper.NormalizeAddress(lanAddress);
             options.Add($"{displayLan} - Friends on same internet network (LAN)");
+        }
+
+        // Add all available LAN IPs (including IPv6)
+        IEnumerable<IPAddress> allLanIps = NetHelper.GetAllLanIps().ToList();
+        foreach (IPAddress lanIp in allLanIps)
+        {
+            if (lanIp.Equals(lanAddress))
+            {
+                continue; // Skip already added primary LAN IP
+            }
+            string ipType = lanIp.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4";
+            options.Add($"{lanIp} - Friends on same internet network (LAN {ipType})");
         }
 
         IPAddress? sanitizedWan = wanAddress != null ? NetHelper.NormalizeAddress(wanAddress) : null;
