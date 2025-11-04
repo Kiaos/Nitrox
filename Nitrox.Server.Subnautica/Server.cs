@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -278,16 +279,19 @@ public class Server
 
     private async Task LogHowToConnectAsync()
     {
-        Task<IPAddress> localIp = Task.Run(NetHelper.GetLanIp);
         Task<IPAddress> wanIp = NetHelper.GetWanIpAsync();
         Task<IEnumerable<(IPAddress Address, string NetworkName)>> vpnIps = Task.Run(NetHelper.GetVpnIps);
 
         List<string> options = [$"{IPAddress.Loopback} - You (Local)"];
+        
+        // Add WAN IPv4 for internet connections (with port forwarding)
         IPAddress? wanAddress = await wanIp;
         if (wanAddress != null)
         {
-            options.Add("{ip:l} - Friends on another internet network (Port Forwarding)");
+            options.Add("{ip:l} - Friends on another internet network (IPv4 + Port Forwarding)");
         }
+        
+        // Add VPN addresses
         foreach ((IPAddress? vpnAddress, string? vpnName) in await vpnIps)
         {
             if (vpnAddress == null)
@@ -297,51 +301,79 @@ public class Server
             IPAddress displayAddress = NetHelper.NormalizeAddress(vpnAddress);
             options.Add($"{displayAddress} - Friends using {vpnName} (VPN)");
         }
-        // LAN IP could be null if all Ethernet/Wi-Fi interfaces are disabled.
-        IPAddress? lanAddress = await localIp;
-        if (lanAddress != null)
-        {
-            IPAddress displayLan = NetHelper.NormalizeAddress(lanAddress);
-            options.Add($"{displayLan} - Friends on same internet network (LAN)");
-        }
 
-        // Add all available LAN IPs (including IPv6)
-        IEnumerable<IPAddress> allLanIps = NetHelper.GetAllLanIps().ToList();
-        List<IPAddress> ipv6Addresses = new List<IPAddress>();
-        
-        foreach (IPAddress lanIp in allLanIps)
+        // Find the preferred IPv6 address (the one that actually works for internet)
+        IPAddress? preferredIPv6 = GetPreferredIPv6Address();
+        if (preferredIPv6 != null)
         {
-            if (lanIp.Equals(lanAddress))
-            {
-                continue; // Skip already added primary LAN IP
-            }
-            string ipType = lanIp.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4";
-            
-            // Add descriptive information for IPv6 addresses
-            string description = "";
-            if (lanIp.AddressFamily == AddressFamily.InterNetworkV6)
-            {
-                // Store IPv6 addresses for later use as Internet addresses
-                ipv6Addresses.Add(lanIp);
-                
-                // Check if this is a temporary/privacy address or permanent address
-                bool isTemporary = IsTemporaryIPv6Address(lanIp);
-                description = isTemporary ? " - Temporary/Privacy" : " - Permanent/Stable";
-            }
-            
-            options.Add($"{lanIp} - Friends on same internet network (LAN {ipType}{description})");
-        }
-
-        // Add the same IPv6 addresses as Internet addresses since they are globally routable
-        foreach (IPAddress ipv6 in ipv6Addresses)
-        {
-            bool isTemporary = IsTemporaryIPv6Address(ipv6);
+            bool isTemporary = IsTemporaryIPv6Address(preferredIPv6);
             string description = isTemporary ? " - Temporary/Privacy" : " - Permanent/Stable";
-            options.Add($"{ipv6} - Friends on another internet network (Internet IPv6{description})");
+            options.Add($"{preferredIPv6} - Friends on another internet network (IPv6{description})");
         }
 
         IPAddress? sanitizedWan = wanAddress != null ? NetHelper.NormalizeAddress(wanAddress) : null;
         Log.InfoSensitive($"Use IP to connect:{Environment.NewLine}\t{string.Join($"{Environment.NewLine}\t", options)}", sanitizedWan);
+    }
+
+    /// <summary>
+    /// Gets the preferred IPv6 address for internet connections.
+    /// Returns the currently active/preferred IPv6 address (like what curl -6 would use).
+    /// </summary>
+    private static IPAddress? GetPreferredIPv6Address()
+    {
+        // First, try to get the address that would be used for outbound connections
+        // This is similar to what curl -6 ifconfig.io would use
+        foreach (NetworkInterface ni in NetHelper.GetInternetInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up)
+            {
+                continue;
+            }
+
+            foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
+            {
+                IPAddress normalized = NetHelper.NormalizeAddress(ip.Address);
+
+                if (normalized.AddressFamily == AddressFamily.InterNetworkV6
+                    && !normalized.IsIPv6LinkLocal
+                    && !normalized.IsIPv6Multicast
+                    && !normalized.IsIPv6SiteLocal
+                    && !IPAddress.IsLoopback(normalized))
+                {
+                    // Prefer temporary/privacy addresses for outbound connections
+                    // as they are typically the ones used by default
+                    if (IsTemporaryIPv6Address(normalized))
+                    {
+                        return normalized;
+                    }
+                }
+            }
+        }
+
+        // Fallback: return any globally routable IPv6 if no temporary one found
+        foreach (NetworkInterface ni in NetHelper.GetInternetInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up)
+            {
+                continue;
+            }
+
+            foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
+            {
+                IPAddress normalized = NetHelper.NormalizeAddress(ip.Address);
+
+                if (normalized.AddressFamily == AddressFamily.InterNetworkV6
+                    && !normalized.IsIPv6LinkLocal
+                    && !normalized.IsIPv6Multicast
+                    && !normalized.IsIPv6SiteLocal
+                    && !IPAddress.IsLoopback(normalized))
+                {
+                    return normalized;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
