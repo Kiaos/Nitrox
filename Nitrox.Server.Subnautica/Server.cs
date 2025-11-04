@@ -284,11 +284,8 @@ public class Server
         Task<IEnumerable<(IPAddress Address, string NetworkName)>> vpnIps = Task.Run(NetHelper.GetVpnIps);
 
         List<string> options = [$"{IPAddress.Loopback} - You (Local)"];
-        IPAddress? wanAddress = await wanIp;
-        if (wanAddress != null)
-        {
-            options.Add("{ip:l} - Friends on another internet network (Port Forwarding)");
-        }
+        
+        // Add VPN addresses first
         foreach ((IPAddress? vpnAddress, string? vpnName) in await vpnIps)
         {
             if (vpnAddress == null)
@@ -298,6 +295,7 @@ public class Server
             IPAddress displayAddress = NetHelper.NormalizeAddress(vpnAddress);
             options.Add($"{displayAddress} - Friends using {vpnName} (VPN)");
         }
+        
         // LAN IP could be null if all Ethernet/Wi-Fi interfaces are disabled.
         IPAddress? lanAddress = await localIp;
         if (lanAddress != null)
@@ -306,27 +304,27 @@ public class Server
             options.Add($"{displayLan} - Friends on same internet network (LAN)");
         }
 
+        // Add WAN IPv4 after LAN
+        IPAddress? wanAddress = await wanIp;
+        if (wanAddress != null)
+        {
+            options.Add("{ip:l} - Friends on another internet network (Port Forwarding)");
+        }
+
         // Find the preferred IPv6 address for internet connections
         IPAddress? preferredIPv6 = GetPreferredIPv6Address();
         if (preferredIPv6 != null)
         {
             bool isTemporary = IsTemporaryIPv6Address(preferredIPv6);
             string description = isTemporary ? " - Temporary/Privacy" : " - Permanent/Stable";
-            options.Add($"{{ip:l}} - Friends on another internet network (IPv6{description})");
+            options.Add($"{preferredIPv6} - Friends on another internet network (IPv6{description})");
         }
 
-        // Collect all sensitive IPs (public addresses) for log protection
-        List<IPAddress> sensitiveIps = new List<IPAddress>();
-        if (wanAddress != null)
-        {
-            sensitiveIps.Add(NetHelper.NormalizeAddress(wanAddress));
-        }
-        if (preferredIPv6 != null)
-        {
-            sensitiveIps.Add(preferredIPv6);
-        }
-
-        Log.InfoSensitive($"Use IP to connect:{Environment.NewLine}\t{string.Join($"{Environment.NewLine}\t", options)}", sensitiveIps.ToArray());
+        // For log protection, we need to pass the primary sensitive IP (WAN)
+        // The InfoSensitive method will replace all sensitive IPs found in the message
+        IPAddress? primarySensitiveIp = wanAddress != null ? NetHelper.NormalizeAddress(wanAddress) : preferredIPv6;
+        
+        Log.InfoSensitive($"Use IP to connect:{Environment.NewLine}\t{string.Join($"{Environment.NewLine}\t", options)}", primarySensitiveIp);
     }
 
     /// <summary>
