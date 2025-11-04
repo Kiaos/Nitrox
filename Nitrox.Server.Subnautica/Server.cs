@@ -307,6 +307,8 @@ public class Server
 
         // Add all available LAN IPs (including IPv6)
         IEnumerable<IPAddress> allLanIps = NetHelper.GetAllLanIps().ToList();
+        List<IPAddress> ipv6Addresses = new List<IPAddress>();
+        
         foreach (IPAddress lanIp in allLanIps)
         {
             if (lanIp.Equals(lanAddress))
@@ -319,8 +321,10 @@ public class Server
             string description = "";
             if (lanIp.AddressFamily == AddressFamily.InterNetworkV6)
             {
+                // Store IPv6 addresses for later use as Internet addresses
+                ipv6Addresses.Add(lanIp);
+                
                 // Check if this is a temporary/privacy address or permanent address
-                byte[] bytes = lanIp.GetAddressBytes();
                 bool isTemporary = IsTemporaryIPv6Address(lanIp);
                 description = isTemporary ? " - Temporary/Privacy" : " - Permanent/Stable";
             }
@@ -328,13 +332,12 @@ public class Server
             options.Add($"{lanIp} - Friends on same internet network (LAN {ipType}{description})");
         }
 
-        // Add public IPv6 addresses for internet connections
-        IEnumerable<IPAddress> publicIPv6s = NetHelper.GetPublicIPv6Addresses().ToList();
-        foreach (IPAddress publicIpv6 in publicIPv6s)
+        // Add the same IPv6 addresses as Internet addresses since they are globally routable
+        foreach (IPAddress ipv6 in ipv6Addresses)
         {
-            bool isTemporary = IsTemporaryIPv6Address(publicIpv6);
+            bool isTemporary = IsTemporaryIPv6Address(ipv6);
             string description = isTemporary ? " - Temporary/Privacy" : " - Permanent/Stable";
-            options.Add($"{publicIpv6} - Friends on another internet network (Internet IPv6{description})");
+            options.Add($"{ipv6} - Friends on another internet network (Internet IPv6{description})");
         }
 
         IPAddress? sanitizedWan = wanAddress != null ? NetHelper.NormalizeAddress(wanAddress) : null;
