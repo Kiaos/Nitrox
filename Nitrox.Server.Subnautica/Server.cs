@@ -314,11 +314,64 @@ public class Server
                 continue; // Skip already added primary LAN IP
             }
             string ipType = lanIp.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4";
-            options.Add($"{lanIp} - Friends on same internet network (LAN {ipType})");
+            
+            // Add descriptive information for IPv6 addresses
+            string description = "";
+            if (lanIp.AddressFamily == AddressFamily.InterNetworkV6)
+            {
+                // Check if this is a temporary/privacy address or permanent address
+                byte[] bytes = lanIp.GetAddressBytes();
+                bool isTemporary = IsTemporaryIPv6Address(lanIp);
+                description = isTemporary ? " - Temporary/Privacy" : " - Permanent/Stable";
+            }
+            
+            options.Add($"{lanIp} - Friends on same internet network (LAN {ipType}{description})");
+        }
+
+        // Add public IPv6 addresses for internet connections
+        IEnumerable<IPAddress> publicIPv6s = NetHelper.GetPublicIPv6Addresses().ToList();
+        foreach (IPAddress publicIpv6 in publicIPv6s)
+        {
+            bool isTemporary = IsTemporaryIPv6Address(publicIpv6);
+            string description = isTemporary ? " - Temporary/Privacy" : " - Permanent/Stable";
+            options.Add($"{publicIpv6} - Friends on another internet network (Internet IPv6{description})");
         }
 
         IPAddress? sanitizedWan = wanAddress != null ? NetHelper.NormalizeAddress(wanAddress) : null;
         Log.InfoSensitive($"Use IP to connect:{Environment.NewLine}\t{string.Join($"{Environment.NewLine}\t", options)}", sanitizedWan);
+    }
+
+    /// <summary>
+    /// Determines if an IPv6 address is a temporary/privacy address or permanent address.
+    /// Temporary addresses typically have more random-looking interface identifiers.
+    /// </summary>
+    private static bool IsTemporaryIPv6Address(IPAddress ipv6Address)
+    {
+        if (ipv6Address.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            return false;
+        }
+
+        byte[] bytes = ipv6Address.GetAddressBytes();
+        
+        // Check the interface identifier (last 8 bytes) for patterns
+        // Temporary addresses typically have more random patterns
+        // This is a heuristic - not 100% accurate but good enough for logging purposes
+        
+        // EUI-64 based addresses (permanent) often have specific patterns
+        // Look for common EUI-64 indicators in bytes 8-15
+        if (bytes.Length >= 16)
+        {
+            // Check if it follows EUI-64 pattern (bit flip in byte 8)
+            // Permanent addresses often have fe80:: prefix for link-local or structured patterns
+            bool hasStructuredPattern = (bytes[8] & 0x02) != 0; // Universal/Local bit
+            
+            // Temporary addresses are more random, permanent ones often have patterns
+            // This is a simple heuristic - in practice, OS-specific APIs would be more accurate
+            return !hasStructuredPattern;
+        }
+        
+        return false; // Default to permanent if unsure
     }
 
     public void StopAndWait(bool shouldSave = true)

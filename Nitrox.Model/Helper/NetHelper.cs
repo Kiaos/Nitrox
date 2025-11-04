@@ -289,6 +289,72 @@ public static class NetHelper
     }
 
     /// <summary>
+    ///     Gets public IPv6 addresses that can be used for internet connections.
+    /// </summary>
+    public static IEnumerable<IPAddress> GetPublicIPv6Addresses()
+    {
+        foreach (NetworkInterface ni in GetInternetInterfaces())
+        {
+            foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
+            {
+                IPAddress normalized = NormalizeAddress(ip.Address);
+
+                // Only include IPv6 addresses that are globally routable
+                if (normalized.AddressFamily == AddressFamily.InterNetworkV6
+                    && !normalized.IsIPv6LinkLocal
+                    && !normalized.IsIPv6Multicast
+                    && !normalized.IsIPv6SiteLocal
+                    && !IPAddress.IsLoopback(normalized)
+                    && IsGloballyRoutableIPv6(normalized))
+                {
+                    yield return normalized;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Checks if an IPv6 address is globally routable (can be reached from the internet).
+    /// </summary>
+    private static bool IsGloballyRoutableIPv6(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            return false;
+        }
+
+        byte[] bytes = address.GetAddressBytes();
+        
+        // Check for Unique Local Addresses (fc00::/7)
+        if ((bytes[0] & 0xfe) == 0xfc)
+        {
+            return false;
+        }
+            
+        // Check for reserved ranges that are not globally routable
+        // Documentation prefix (2001:db8::/32)
+        if (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8)
+        {
+            return false;
+        }
+            
+        // 6to4 (2002::/16) - may work but often behind NAT
+        if (bytes[0] == 0x20 && bytes[1] == 0x02)
+        {
+            return false;
+        }
+            
+        // Teredo (2001::/32) - tunneled, may not work reliably
+        if (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x00 && bytes[3] == 0x00)
+        {
+            return false;
+        }
+
+        // If it starts with 2000::/3 (001 in binary), it's likely globally routable
+        return (bytes[0] & 0xe0) == 0x20;
+    }
+
+    /// <summary>
     ///     Returns true if the IP address points to the executing machine.
     /// </summary>
     public static bool IsLocalhost(this IPAddress? address)
